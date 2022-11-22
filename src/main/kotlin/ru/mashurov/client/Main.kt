@@ -1,5 +1,6 @@
 package ru.mashurov.client
 
+import Keyboard.Companion.listKeyboard
 import Keyboard.Companion.mainMenuKeyboard
 import Keyboard.Companion.petOneKeyboard
 import Keyboard.Companion.petsKeyboard
@@ -21,8 +22,8 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import ru.mashurov.client.IdType.TELEGRAM
 import ru.mashurov.client.Messages.Companion.startMessage
-import ru.mashurov.client.dtos.PetDto
-import ru.mashurov.client.dtos.UserDto
+import ru.mashurov.client.dtos.*
+import ru.mashurov.client.services.AppointmentClient
 import ru.mashurov.client.services.PetClient
 import ru.mashurov.client.services.UserClient
 
@@ -40,13 +41,15 @@ val retrofit: Retrofit = Retrofit.Builder()
     .client(okHttpClient)
     .build()
 
-var userId: Long? = null
+val appointmentRequestDto = AppointmentRequestDto()
 
 fun main() {
+
     httpLoggingInterceptor.level = HttpLoggingInterceptor.Level.BODY
 
     val userClient = retrofit.create(UserClient::class.java)
     val petClient = retrofit.create(PetClient::class.java)
+    val appointmentClient = retrofit.create(AppointmentClient::class.java)
 
     val bot = bot {
         token = System.getenv("BOT_TOKEN")
@@ -54,11 +57,117 @@ fun main() {
         dispatch {
             startCommand(userClient)
             petCommands(userClient, petClient)
+            appointmentCommands(userClient, appointmentClient)
             mainCommand(userClient)
         }
     }
 
     bot.startPolling()
+}
+
+private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentClient: AppointmentClient) {
+
+    callbackQuery("appointment_req") {
+
+        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute().body()!!
+        appointmentRequestDto.userId = user.id!!
+        appointmentRequestDto.regionCode = user.region!!.code
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "Выберите питомца",
+            replyMarkup = listKeyboard("appointment_req_1", user.pets!!.map(PetDto::toNamedEntityDto).toMutableList())
+        )
+    }
+
+    callbackQuery("appointment_req_1") {
+
+        appointmentRequestDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val clinics = appointmentClient.findAllClinics(appointmentRequestDto.regionCode).execute().body()!!
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "Выберите клинику",
+            replyMarkup = listKeyboard("appointment_req_2", clinics.map(ClinicDto::toNamedEntityDto).toMutableList())
+        )
+    }
+
+    callbackQuery("appointment_req_2") {
+
+        appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val appointmentPlaceKeyboard = InlineKeyboardMarkup.create(
+            listOf(
+                listOf(
+                    InlineKeyboardButton.CallbackData("На дому", "appointment_req_3?place=home"),
+                    InlineKeyboardButton.CallbackData("В клинике", "appointment_req_3?place=clinic")
+                )
+            )
+        )
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "На дому или в клинике",
+            replyMarkup = appointmentPlaceKeyboard
+        )
+    }
+
+    callbackQuery("appointment_req_3") {
+
+        appointmentRequestDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
+
+        val clinic = appointmentClient.findClinic(appointmentRequestDto.clinicId).execute().body()!!
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "Выберите необходимую услугу",
+            replyMarkup = listKeyboard(
+                "appointment_req_4",
+                clinic.services.map(ServiceDto::toNamedEntityDto).toMutableList()
+            )
+        )
+    }
+
+    callbackQuery("appointment_req_4") {
+
+        appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val veterinarians = appointmentClient.findAllVeterinarians(appointmentRequestDto.clinicId).execute().body()!!
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "Выберите ветеринара",
+            replyMarkup = listKeyboard(
+                "appointment_req_5",
+                veterinarians.map(VeterinarianDto::toNamedEntityDto).toMutableList()
+            )
+        )
+    }
+
+    callbackQuery("appointment_req_5") {
+
+        appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val response = appointmentClient.createRequest(appointmentRequestDto).execute()
+
+        val answerMessage = when (response.isSuccessful) {
+            true -> "Ваше заявление на приём успешно создано!"
+            else -> "К сожалению, при создании вашего заявления произошла какая-то ошибка. Повторите попытку позже"
+        }
+
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = answerMessage,
+            replyMarkup = mainMenuKeyboard
+        )
+    }
 }
 
 private fun Dispatcher.mainCommand(userClient: UserClient) {
@@ -71,6 +180,7 @@ private fun Dispatcher.mainCommand(userClient: UserClient) {
     }
 
     callbackQuery("back") {
+
         bot.editMessageText(
             ChatId.fromId(callbackQuery.message!!.chat.id),
             callbackQuery.message!!.messageId,
@@ -94,19 +204,15 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
 
     callbackQuery("pets_list") {
 
-        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.typeString).execute().body()!!
+        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute().body()!!
 
         if (user.pets!!.isNotEmpty()) {
-
-            val replyMarkup = InlineKeyboardMarkup.create(
-                getPetInlineButtons(user.pets)
-            )
 
             bot.editMessageText(
                 ChatId.fromId(callbackQuery.message!!.chat.id),
                 callbackQuery.message!!.messageId,
                 text = "Ваши питомцы",
-                replyMarkup = replyMarkup
+                replyMarkup = listKeyboard("pet_one", user.pets.map(PetDto::toNamedEntityDto).toMutableList())
             )
 
         } else {
@@ -122,7 +228,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
 
     callbackQuery("pets_add") {
 
-        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.typeString).execute().body()!!
+        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute().body()!!
 
         bot.sendMessage(
             ChatId.fromId(callbackQuery.message!!.chat.id),
@@ -198,7 +304,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
     callbackQuery("pet_one_change") {
 
         val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.typeString).execute().body()!!
+        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute().body()!!
 
         bot.sendMessage(
             ChatId.fromId(callbackQuery.message!!.chat.id),
@@ -206,6 +312,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
         )
 
         text {
+
             //TODO довести до ума, а то пока печально
             with(update.message?.text.toString().trim().split(" ")) {
                 val name = get(0)
@@ -231,30 +338,6 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
     }
 }
 
-private fun getPetInlineButtons(pets: MutableList<PetDto>): ArrayList<ArrayList<InlineKeyboardButton>> {
-
-    val petKeyMatrix = ArrayList<ArrayList<InlineKeyboardButton>>()
-
-    var list = ArrayList<InlineKeyboardButton>()
-    for (pet in pets) {
-
-        list.add(InlineKeyboardButton.CallbackData(pet.name, "pet_one?id=${pet.id}"))
-
-        if (list.size == 2) {
-            petKeyMatrix.add(list)
-            list = ArrayList()
-        }
-    }
-
-    if (list.size != 2) {
-        petKeyMatrix.add(list)
-    }
-
-    petKeyMatrix.add(arrayListOf(InlineKeyboardButton.CallbackData("<< В меню", "back")))
-
-    return petKeyMatrix
-}
-
 fun determineGender(gender: String): String =
     when (gender) {
         "м" -> "Мужской"
@@ -266,7 +349,7 @@ private fun Dispatcher.startCommand(userClient: UserClient) {
 
     command("start") {
 
-        val isUserExists = userClient.existByTelegramId(message.chat.id, TELEGRAM.typeString).execute().body()!!
+        val isUserExists = userClient.existByTelegramId(message.chat.id, TELEGRAM.type).execute().body()!!
 
         if (!isUserExists) {
 
@@ -296,14 +379,13 @@ private fun Dispatcher.startCommand(userClient: UserClient) {
                     regionDto,
                     mutableListOf()
                 )
+
                 val user = userClient.save(userDto).execute().body()
-                userId = user!!.id
             }
 
         } else {
 
-            val user = userClient.getUser(message.chat.id, TELEGRAM.typeString).execute().body()
-            userId = user!!.id
+            val user = userClient.getUser(message.chat.id, TELEGRAM.type).execute().body()
 
             bot.sendMessage(
                 ChatId.fromId(message.chat.id),
