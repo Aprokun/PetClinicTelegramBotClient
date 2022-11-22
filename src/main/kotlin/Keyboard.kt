@@ -18,18 +18,19 @@ sealed class Keyboard {
 
         val petsKeyboard = InlineKeyboardMarkup.create(
             listOf(
-                listOf(InlineKeyboardButton.CallbackData("Список питомцев", "pets_list")),
-                listOf(InlineKeyboardButton.CallbackData("Добавить", "pets_add"), InlineKeyboardButton.CallbackData("Удалить", "pets_del")),
+                listOf(InlineKeyboardButton.CallbackData("Список питомцев", "pets_list"), InlineKeyboardButton.CallbackData("Добавить", "pets_add")),
                 listOf(InlineKeyboardButton.CallbackData("<< В начало", "back"))
             )
         )
 
-        val petOneKeyboard = InlineKeyboardMarkup.create(
-            listOf(
-                listOf(InlineKeyboardButton.CallbackData("Изменить", "pet_one_change"), InlineKeyboardButton.CallbackData("Удалить", "pet_one_delete")),
-                listOf(InlineKeyboardButton.CallbackData("<< В начало", "back"))
+        val petOneKeyboard = { id: Long ->
+            InlineKeyboardMarkup.create(
+                listOf(
+                    listOf(InlineKeyboardButton.CallbackData("Изменить", "pet_one_change?id=$id"), InlineKeyboardButton.CallbackData("Удалить", "pet_one_delete?id=$id")),
+                    listOf(InlineKeyboardButton.CallbackData("<< В начало", "back"))
+                )
             )
-        )
+        }
 
     }
 

@@ -5,10 +5,7 @@ import Keyboard.Companion.petOneKeyboard
 import Keyboard.Companion.petsKeyboard
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
-import com.github.kotlintelegrambot.dispatcher.Dispatcher
-import com.github.kotlintelegrambot.dispatcher.callbackQuery
-import com.github.kotlintelegrambot.dispatcher.command
-import com.github.kotlintelegrambot.dispatcher.message
+import com.github.kotlintelegrambot.dispatcher.*
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
 import com.github.kotlintelegrambot.entities.KeyboardReplyMarkup
@@ -176,7 +173,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
                 Возраст: ${pet.age}
                 Пол: ${pet.gender}
             """.trimIndent(),
-            replyMarkup = petOneKeyboard
+            replyMarkup = petOneKeyboard(id)
         )
     }
 
@@ -201,7 +198,35 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient)
     callbackQuery("pet_one_change") {
 
         val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.typeString).execute().body()!!
 
+        bot.sendMessage(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            "Введите новые данные для питомца (Имя, пол, возраст через пробел)"
+        )
+
+        text {
+            //TODO довести до ума, а то пока печально
+            with(update.message?.text.toString().trim().split(" ")) {
+                val name = get(0)
+                val gender = determineGender(get(1))
+                val age = get(2).toInt()
+
+                val response = petClient.save(PetDto(name, age, user = user, gender = gender, id = id)).execute()
+
+                val answerMessage = when (response.isSuccessful) {
+                    true -> "Данные успешно изменены!"
+                    false -> "Произошла какая-то ошибка, попробуйте позже"
+                }
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = answerMessage,
+                    replyMarkup = petsKeyboard
+                )
+            }
+        }
 
     }
 }
@@ -219,6 +244,10 @@ private fun getPetInlineButtons(pets: MutableList<PetDto>): ArrayList<ArrayList<
             petKeyMatrix.add(list)
             list = ArrayList()
         }
+    }
+
+    if (list.size != 2) {
+        petKeyMatrix.add(list)
     }
 
     petKeyMatrix.add(arrayListOf(InlineKeyboardButton.CallbackData("<< В меню", "back")))
