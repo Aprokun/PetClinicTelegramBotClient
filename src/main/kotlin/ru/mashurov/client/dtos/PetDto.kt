@@ -7,3 +7,7 @@ data class PetDto(
     val id: Long? = null,
     val user: UserDto? = null
 )
+
+fun PetDto.toNamedEntityDto(): NamedEntityDto {
+    return NamedEntityDto(id!!, name)
+}
