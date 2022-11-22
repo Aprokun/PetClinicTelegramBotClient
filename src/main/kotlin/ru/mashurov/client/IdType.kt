@@ -1,5 +1,5 @@
 package ru.mashurov.client
 
-enum class IdType(val typeString: String) {
+enum class IdType(val type: String) {
     TELEGRAM("telegram"), TABLE("table")
 }
