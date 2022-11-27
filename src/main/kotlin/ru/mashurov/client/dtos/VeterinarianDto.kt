@@ -8,4 +8,6 @@ data class VeterinarianDto(
     val id: Long? = null
 )
 
+fun VeterinarianDto.getSNP() = "$surname $name $patronymic"
+
 fun VeterinarianDto.toNamedEntityDto() = NamedEntityDto(id!!, name)

@@ -1,23 +1,12 @@
 package ru.mashurov.client.services
 
 import retrofit2.Call
-import retrofit2.http.*
-import ru.mashurov.client.dtos.AppointmentRequestDto
-import ru.mashurov.client.dtos.ClinicDto
-import ru.mashurov.client.dtos.VeterinarianDto
+import retrofit2.http.GET
+import retrofit2.http.Path
+import ru.mashurov.client.dtos.AppointmentDto
 
 interface AppointmentClient {
 
-    @GET("/api/clinics")
-    fun findAllClinics(@Query("region") region: Long): Call<MutableList<ClinicDto>>
-
-    @GET("/api/clinics/{id}/get")
-    fun findClinic(@Path("id") id: Long): Call<ClinicDto>
-
-    @GET("/api/veterinarians")
-    fun findAllVeterinarians(@Query("clinic") clinic: Long): Call<MutableList<VeterinarianDto>>
-
-    @POST("/api/appointments/create")
-    fun createRequest(@Body req: AppointmentRequestDto): Call<Void>
-
+    @GET("/api/appointments/{petId}/history")
+    fun fetchHistory(@Path("petId") petId: Long): Call<List<AppointmentDto>>
 }
