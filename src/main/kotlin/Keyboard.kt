@@ -37,6 +37,9 @@ sealed class Keyboard {
                         InlineKeyboardButton.CallbackData("Изменить", "pet_one_change?id=$id"),
                         InlineKeyboardButton.CallbackData("Удалить", "pet_one_delete?id=$id")
                     ),
+                    listOf(
+                        InlineKeyboardButton.CallbackData("Список болезней", "pet_one_disease?id=$id")
+                    ),
                     listOf(InlineKeyboardButton.CallbackData("<< В начало", "back"))
                 )
             )
