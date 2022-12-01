@@ -29,6 +29,8 @@ import ru.mashurov.client.services.AppointmentRequestClient
 import ru.mashurov.client.services.PetClient
 import ru.mashurov.client.services.UserClient
 
+class Main
+
 val gson: Gson = GsonBuilder()
     .setDateFormat("yyyy-MM-dd HH:mm:ssZ")
     .create()
