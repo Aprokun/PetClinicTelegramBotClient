@@ -49,17 +49,25 @@ sealed class Keyboard {
             InlineKeyboardMarkup.create(getPetInlineButtons(callbackQuery, entities))
         }
 
+        val oneDeleteKeyboard = { callbackQuery: String, id: Long ->
+            InlineKeyboardMarkup.create(
+                listOf(
+                    listOf(InlineKeyboardButton.CallbackData("Отменить", "$callbackQuery?id=$id"))
+                )
+            )
+        }
+
         private fun getPetInlineButtons(
             callbackQuery: String,
-            pets: MutableList<NamedEntityDto>
+            entities: MutableList<NamedEntityDto>
         ): ArrayList<ArrayList<InlineKeyboardButton>> {
 
             val petKeyMatrix = ArrayList<ArrayList<InlineKeyboardButton>>()
             var list = ArrayList<InlineKeyboardButton>()
 
-            for (pet in pets) {
+            for (entity in entities) {
 
-                list.add(InlineKeyboardButton.CallbackData(pet.name, "$callbackQuery?id=${pet.id}"))
+                list.add(InlineKeyboardButton.CallbackData(entity.name, "$callbackQuery?id=${entity.id}"))
 
                 if (list.size == 2) {
                     petKeyMatrix.add(list)

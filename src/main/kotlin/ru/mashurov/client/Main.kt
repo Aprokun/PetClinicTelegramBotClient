@@ -2,6 +2,7 @@ package ru.mashurov.client
 
 import Keyboard.Companion.listKeyboard
 import Keyboard.Companion.mainMenuKeyboard
+import Keyboard.Companion.oneDeleteKeyboard
 import Keyboard.Companion.petOneKeyboard
 import Keyboard.Companion.petsKeyboard
 import com.github.kotlintelegrambot.bot
@@ -45,7 +46,7 @@ val retrofit: Retrofit = Retrofit.Builder()
     .client(okHttpClient)
     .build()
 
-val appointmentRequestDto = AppointmentRequestDto()
+val appointmentRequestCreateDto = AppointmentRequestCreateDto()
 
 fun main() {
 
@@ -63,11 +64,81 @@ fun main() {
             startCommand(userClient)
             petCommands(userClient, petClient, appointmentClient)
             appointmentCommands(userClient, appointmentRequestClient)
+            appointmentRequestsCommands(userClient, appointmentRequestClient)
             mainCommand(userClient)
         }
     }
 
     bot.startPolling()
+}
+
+private fun Dispatcher.appointmentRequestsCommands(
+    userClient: UserClient,
+    appointmentRequestClient: AppointmentRequestClient
+) {
+
+    callbackQuery("my_appointments") {
+
+        val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
+
+        if (userRequest.isSuccessful) {
+
+            val user = userRequest.body()!!
+
+            val userAppointments = appointmentRequestClient.fetchAllAppointmentRequests(user.id!!).execute().body()
+
+            if (userAppointments!!.isNotEmpty()) {
+
+                userAppointments.forEach {
+                    bot.sendMessage(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        """
+                        Заявление №${it.id}
+                        Клиника: ${it.clinicName}
+                        Ветеринар: ${it.veterinarianName}
+                        Услуга: ${it.serviceName}
+                        Место оказания: ${it.appointmentPlace}
+                        Питомец: ${it.petName}
+                    """.trimIndent(),
+                        replyMarkup = oneDeleteKeyboard("del_appointment_req", it.id)
+                    )
+                }
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "У вас нет никаких заявлений, попробуйте подать заявление через главное меню",
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+
+        }
+    }
+
+    callbackQuery("del_appointment_req") {
+
+        val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val removeRequest = appointmentRequestClient.remove(id).execute()
+
+        if (removeRequest.isSuccessful) {
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = "Заявление №$id успешно удалено!"
+            )
+
+        } else {
+
+            bot.sendMessage(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                "Произошла ошибка при удалении заявления №$id, попробуйте позже"
+            )
+        }
+    }
 }
 
 private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRequestClient: AppointmentRequestClient) {
@@ -80,8 +151,8 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
             val user = userRequest.body()!!
 
-            appointmentRequestDto.userId = user.id!!
-            appointmentRequestDto.regionCode = user.region!!.code
+            appointmentRequestCreateDto.userId = user.id!!
+            appointmentRequestCreateDto.regionCode = user.region!!.code
 
             if (callbackQuery.data == "appointment_req") {
 
@@ -109,9 +180,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
     callbackQuery("appointment_req_1") {
 
-        appointmentRequestDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        appointmentRequestCreateDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
-        val clinicsRequest = appointmentRequestClient.findAllClinics(appointmentRequestDto.regionCode).execute()
+        val clinicsRequest = appointmentRequestClient.findAllClinics(appointmentRequestCreateDto.regionCode).execute()
 
         if (clinicsRequest.isSuccessful) {
 
@@ -140,7 +211,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
     callbackQuery("appointment_req_2") {
 
-        appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        appointmentRequestCreateDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
         val appointmentPlaceKeyboard = InlineKeyboardMarkup.create(
             listOf(
@@ -161,9 +232,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
     callbackQuery("appointment_req_3") {
 
-        appointmentRequestDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
+        appointmentRequestCreateDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
 
-        val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestDto.clinicId).execute()
+        val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestCreateDto.clinicId).execute()
 
         if (clinicRequest.isSuccessful) {
 
@@ -192,10 +263,10 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
     callbackQuery("appointment_req_4") {
 
-        appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        appointmentRequestCreateDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
         val veterinariansRequest =
-            appointmentRequestClient.findAllVeterinarians(appointmentRequestDto.clinicId).execute()
+            appointmentRequestClient.findAllVeterinarians(appointmentRequestCreateDto.clinicId).execute()
 
         if (veterinariansRequest.isSuccessful) {
 
@@ -223,9 +294,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
     callbackQuery("appointment_req_5") {
 
-        appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        appointmentRequestCreateDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
-        val response = appointmentRequestClient.createRequest(appointmentRequestDto).execute()
+        val response = appointmentRequestClient.createRequest(appointmentRequestCreateDto).execute()
 
         val answerMessage = when (response.isSuccessful) {
             true -> "Ваше заявление на приём успешно создано!"
@@ -467,7 +538,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
     }
 }
 
-fun determineGender(gender: String): String =
+private fun determineGender(gender: String): String =
     when (gender) {
         "м" -> "Мужской"
         "ж" -> "Женский"

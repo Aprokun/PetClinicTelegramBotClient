@@ -2,6 +2,7 @@ package ru.mashurov.client.services
 
 import retrofit2.Call
 import retrofit2.http.*
+import ru.mashurov.client.dtos.AppointmentRequestCreateDto
 import ru.mashurov.client.dtos.AppointmentRequestDto
 import ru.mashurov.client.dtos.ClinicDto
 import ru.mashurov.client.dtos.VeterinarianDto
@@ -18,6 +19,11 @@ interface AppointmentRequestClient {
     fun findAllVeterinarians(@Query("clinic") clinic: Long): Call<MutableList<VeterinarianDto>>
 
     @POST("/api/appointments/create")
-    fun createRequest(@Body req: AppointmentRequestDto): Call<Void>
+    fun createRequest(@Body req: AppointmentRequestCreateDto): Call<Void>
 
+    @GET("/api/appointments")
+    fun fetchAllAppointmentRequests(@Query("id") id: Long): Call<MutableList<AppointmentRequestDto>>
+
+    @DELETE("/api/appointments/{id}/remove")
+    fun remove(@Path("id") id: Long): Call<Void>
 }
