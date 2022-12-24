@@ -23,13 +23,13 @@ import ru.mashurov.client.IdType.TABLE
 import ru.mashurov.client.IdType.TELEGRAM
 import ru.mashurov.client.Messages.Companion.GENERAL_ERROR_MESSAGE
 import ru.mashurov.client.Messages.Companion.startMessage
+import ru.mashurov.client.Utils.Companion.determineGender
+import ru.mashurov.client.Utils.Companion.getDates
 import ru.mashurov.client.Utils.Companion.getRusDayName
 import ru.mashurov.client.Utils.Companion.getUrlParams
 import ru.mashurov.client.Utils.Companion.isSameCallbackQueryDataUrl
-import ru.mashurov.client.Utils.Companion.isWorkDay
 import ru.mashurov.client.dtos.*
 import ru.mashurov.client.services.*
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter.ofPattern
 
 class Main
@@ -48,7 +48,7 @@ val retrofit: Retrofit = Retrofit.Builder()
     .client(okHttpClient)
     .build()
 
-val appointmentRequestDto = AppointmentRequestDto()
+val appointmentRequestCreateDto = AppointmentRequestCreateDto()
 
 fun main() {
 
@@ -57,6 +57,7 @@ fun main() {
     val userClient = retrofit.create(UserClient::class.java)
     val petClient = retrofit.create(PetClient::class.java)
     val appointmentRequestClient = retrofit.create(AppointmentRequestClient::class.java)
+    val appointmentRequestsClient = retrofit.create(AppointmentRequestsClient::class.java)
     val appointmentClient = retrofit.create(AppointmentClient::class.java)
     val regionClient = retrofit.create(RegionClient::class.java)
 
@@ -65,8 +66,9 @@ fun main() {
         logLevel = LogLevel.All()
         dispatch {
             startCommand(userClient)
+            appointmentRequestsCommands(userClient, appointmentRequestsClient)
             petCommands(userClient, petClient, appointmentClient)
-            appointmentCommands(userClient, appointmentRequestClient)
+            appointmentRequestCommands(userClient, appointmentRequestClient)
             mainCommand(userClient)
             profileSettingsCommands(regionClient, userClient)
         }
@@ -75,10 +77,134 @@ fun main() {
     bot.startPolling()
 }
 
+private fun Dispatcher.appointmentRequestsCommands(
+    userClient: UserClient,
+    appointmentRequestsClient: AppointmentRequestsClient
+) {
+
+    callbackQuery("my_appointments") {
+
+        val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
+
+        if (userRequest.isSuccessful) {
+
+            val userId = userRequest.body()!!.id!!
+
+            val requestsRequest = appointmentRequestsClient.findAllByUserId(userId).execute()
+
+            if (requestsRequest.isSuccessful) {
+
+                val requests = requestsRequest.body()!!
+
+                if (requests.content.isNotEmpty()) {
+
+                    requests.content.forEach {
+
+                        val keyboard = InlineKeyboardMarkup.create(
+                            listOf(
+                                listOf(
+                                    InlineKeyboardButton.CallbackData("Отменить", "req_cancel?id=${it.id}")
+                                )
+                            )
+                        )
+
+                        bot.sendMessage(
+                            ChatId.fromId(callbackQuery.message!!.chat.id),
+                            """
+                            Заявление №${it.id}
+                            Клиника: ${it.clinicName}
+                            Адрес: ${if (it.appointmentPlace == "clinic") it.clinicAddress else "На дому"}
+                            Ветеринар: ${it.veterinarianName}
+                            Услуга: ${it.serviceName}
+                            Дата: ${it.date}
+                            Статус заявления: ${it.status}
+                            Питомец: ${it.petName}
+                        """.trimIndent(),
+                            replyMarkup = keyboard
+                        )
+                    }
+
+                } else {
+
+                    bot.editMessageText(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        callbackQuery.message!!.messageId,
+                        text = "У вас нет никаких необработанных заявлений",
+                        replyMarkup = mainMenuKeyboard
+                    )
+                }
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+
+        } else {
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = GENERAL_ERROR_MESSAGE,
+                replyMarkup = mainMenuKeyboard
+            )
+        }
+    }
+
+    callbackQuery("req_cancel") {
+
+        val reqId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
+
+        if (userRequest.isSuccessful) {
+
+            val userId = userRequest.body()!!.id!!
+
+            val cancelRequest = appointmentRequestsClient.cancelById(userId, reqId).execute()
+
+            if (cancelRequest.isSuccessful) {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Заявление №$reqId отменено"
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+
+        } else {
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = GENERAL_ERROR_MESSAGE,
+                replyMarkup = mainMenuKeyboard
+            )
+        }
+
+
+    }
+
+}
+
 private fun Dispatcher.profileSettingsCommands(
     regionClient: RegionClient,
     userClient: UserClient
 ) {
+
     callbackQuery("profile_settings") {
 
         bot.editMessageText(
@@ -164,7 +290,10 @@ private fun Dispatcher.profileSettingsCommands(
     }
 }
 
-private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRequestClient: AppointmentRequestClient) {
+private fun Dispatcher.appointmentRequestCommands(
+    userClient: UserClient,
+    appointmentRequestClient: AppointmentRequestClient
+) {
 
     callbackQuery("appointment_req") {
 
@@ -176,7 +305,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
                 val user = userRequest.body()!!
 
-                appointmentRequestDto.userId = user.id!!
+                appointmentRequestCreateDto.userId = user.id!!
 
                 bot.editMessageText(
                     ChatId.fromId(callbackQuery.message!!.chat.id),
@@ -204,9 +333,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_1", callbackQuery.data)) {
 
-            appointmentRequestDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
-            val user = userClient.getUser(appointmentRequestDto.userId, TABLE.type).execute().body()!!
+            val user = userClient.getUser(appointmentRequestCreateDto.userId, TABLE.type).execute().body()!!
             val clinicsRequest = appointmentRequestClient.findAllClinics(user.region!!.code).execute()
 
             if (clinicsRequest.isSuccessful) {
@@ -240,9 +369,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_1_conf", callbackQuery.data)) {
 
-            appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
-            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestDto.clinicId).execute()
+            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestCreateDto.clinicId).execute()
 
             if (clinicRequest.isSuccessful) {
 
@@ -254,7 +383,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
                             InlineKeyboardButton.CallbackData("Далее", "appointment_req_2?id=${clinic.id}"),
                             InlineKeyboardButton.CallbackData(
                                 "Назад",
-                                "appointment_req_1?id=${appointmentRequestDto.petId}"
+                                "appointment_req_1?id=${appointmentRequestCreateDto.petId}"
                             )
                         )
                     )
@@ -278,7 +407,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_2", callbackQuery.data)) {
 
-            appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
             val appointmentPlaceKeyboard = InlineKeyboardMarkup.create(
                 listOf(
@@ -302,9 +431,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_3", callbackQuery.data)) {
 
-            appointmentRequestDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
+            appointmentRequestCreateDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
 
-            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestDto.clinicId).execute()
+            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestCreateDto.clinicId).execute()
 
             if (clinicRequest.isSuccessful) {
 
@@ -336,9 +465,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_3_conf", callbackQuery.data)) {
 
-            appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
-            val serviceRequest = appointmentRequestClient.findService(appointmentRequestDto.serviceId).execute()
+            val serviceRequest = appointmentRequestClient.findService(appointmentRequestCreateDto.serviceId).execute()
 
             if (serviceRequest.isSuccessful) {
 
@@ -350,7 +479,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
                             InlineKeyboardButton.CallbackData("Далее", "appointment_req_4?id=${service.id}"),
                             InlineKeyboardButton.CallbackData(
                                 "Назад",
-                                "appointment_req_3?place=${appointmentRequestDto.appointmentPlace}"
+                                "appointment_req_3?place=${appointmentRequestCreateDto.appointmentPlace}"
                             )
                         )
                     )
@@ -384,10 +513,10 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_4", callbackQuery.data)) {
 
-            appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
             val veterinariansRequest = appointmentRequestClient
-                .findAllVeterinariansByClinicId(appointmentRequestDto.clinicId)
+                .findAllVeterinariansByClinicId(appointmentRequestCreateDto.clinicId)
                 .execute()
 
             if (veterinariansRequest.isSuccessful) {
@@ -420,10 +549,10 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_4_conf", callbackQuery.data)) {
 
-            appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
             val veterinarianRequest =
-                appointmentRequestClient.findVeterinarian(appointmentRequestDto.veterinarianId).execute()
+                appointmentRequestClient.findVeterinarian(appointmentRequestCreateDto.veterinarianId).execute()
 
             if (veterinarianRequest.isSuccessful) {
 
@@ -435,7 +564,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
                             InlineKeyboardButton.CallbackData("Далее", "appointment_req_5?id=${veterinarian.id}"),
                             InlineKeyboardButton.CallbackData(
                                 "Назад",
-                                "appointment_req_4?id=${appointmentRequestDto.serviceId}"
+                                "appointment_req_4?id=${appointmentRequestCreateDto.serviceId}"
                             )
                         )
                     )
@@ -468,7 +597,7 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_5", callbackQuery.data)) {
 
-            appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+            appointmentRequestCreateDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
             // Расписание на две недели вперёд
             val dates = getDates(2)
@@ -507,11 +636,11 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_6", callbackQuery.data)) {
 
-            appointmentRequestDto.date = getUrlParams(callbackQuery.data)["date"]!!
+            appointmentRequestCreateDto.date = getUrlParams(callbackQuery.data)["date"]!!
 
             val timesRequest = appointmentRequestClient
                 .findAllowTimePeriodsByVeterinarianIdAndDate(
-                    appointmentRequestDto.veterinarianId, appointmentRequestDto.date
+                    appointmentRequestCreateDto.veterinarianId, appointmentRequestCreateDto.date
                 )
                 .execute()
 
@@ -575,9 +704,9 @@ private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRe
 
         if (isSameCallbackQueryDataUrl("appointment_req_7", callbackQuery.data)) {
 
-            appointmentRequestDto.date += "T" + getUrlParams(callbackQuery.data)["time"]!!
+            appointmentRequestCreateDto.date += "T" + getUrlParams(callbackQuery.data)["time"]!!
 
-            val response = appointmentRequestClient.createRequest(appointmentRequestDto).execute()
+            val response = appointmentRequestClient.createRequest(appointmentRequestCreateDto).execute()
 
             val answerMessage = when (response.isSuccessful) {
                 true -> "Ваше заявление на приём успешно создано!"
@@ -634,7 +763,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
 
             val user = userRequest.body()!!
 
-            if (user.pets!!.isNotEmpty()) {
+            if (user.pets.isNotEmpty()) {
 
                 bot.editMessageText(
                     ChatId.fromId(callbackQuery.message!!.chat.id),
@@ -820,13 +949,6 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
     }
 }
 
-fun determineGender(gender: String): String =
-    when (gender) {
-        "м" -> "Мужской"
-        "ж" -> "Женский"
-        else -> "Не указан"
-    }
-
 private fun Dispatcher.startCommand(userClient: UserClient) {
 
     command("start") {
@@ -892,23 +1014,5 @@ private fun Dispatcher.startCommand(userClient: UserClient) {
                 )
             }
         }
-
     }
-}
-
-private fun getDates(weeksLimit: Int): List<LocalDate> {
-
-    val dates = mutableListOf<LocalDate>()
-    val now = LocalDate.now()
-
-    for (days in 0L..7 * weeksLimit) {
-
-        val current = now.plusDays(days)
-
-        if (isWorkDay(current.dayOfWeek)) {
-            dates.add(current)
-        }
-    }
-
-    return dates
 }

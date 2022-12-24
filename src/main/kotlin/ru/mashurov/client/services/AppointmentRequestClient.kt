@@ -16,7 +16,7 @@ interface AppointmentRequestClient {
     fun findAllVeterinariansByClinicId(@Path("id") clinicId: Long): Call<PageResolver<VeterinarianDto>>
 
     @POST("/api/appointments/create")
-    fun createRequest(@Body req: AppointmentRequestDto): Call<Void>
+    fun createRequest(@Body req: AppointmentRequestCreateDto): Call<Void>
 
     @GET("/api/services/{id}")
     fun findService(@Path("id") id: Long): Call<ServiceDto>
