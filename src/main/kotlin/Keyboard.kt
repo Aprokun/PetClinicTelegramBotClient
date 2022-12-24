@@ -15,7 +15,6 @@ sealed class Keyboard {
                 ),
                 listOf(
                     InlineKeyboardButton.CallbackData("Настройки профиля", "profile_settings"),
-                    InlineKeyboardButton.CallbackData("Помощь", "help")
                 )
             )
         )
@@ -46,6 +45,10 @@ sealed class Keyboard {
         }
 
         val listKeyboard = { callbackQuery: String, entities: MutableList<NamedEntityDto> ->
+            InlineKeyboardMarkup.create(getPetInlineButtons(callbackQuery, entities))
+        }
+
+        val regionsKeyboard = { callbackQuery: String, entities: MutableList<NamedEntityDto> ->
             InlineKeyboardMarkup.create(getPetInlineButtons(callbackQuery, entities))
         }
 

@@ -8,6 +8,6 @@ data class UserDto(
     val username: String?,
     val telegramId: Long,
     var region: RegionDto?,
-    val pets: MutableList<PetDto>?,
+    val pets: MutableList<PetDto> = mutableListOf(),
     val id: Long? = null
 )

@@ -4,3 +4,5 @@ data class RegionDto(
     val code: Long,
     val name: String
 )
+
+fun RegionDto.toNamedEntityDto() = NamedEntityDto(code, name)

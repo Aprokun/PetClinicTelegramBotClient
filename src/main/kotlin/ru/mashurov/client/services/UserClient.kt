@@ -22,4 +22,10 @@ interface UserClient {
 
     @GET("/api/users/{id}/pets")
     fun getUserPets(@Path("id") id: Long): Call<List<PetDto>>
+
+    @GET("/api/region")
+    fun getRegion(@Query("code") code: Long): Call<RegionDto>
+
+    @PATCH("/api/user/{id}/set-region")
+    fun setRegion(@Path("id") userId: Long, @Query("code") code: Long): Call<Void>
 }
