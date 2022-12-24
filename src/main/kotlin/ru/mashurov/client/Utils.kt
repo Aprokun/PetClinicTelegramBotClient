@@ -1,10 +1,36 @@
 package ru.mashurov.client
 
 import java.time.DayOfWeek
+import java.time.LocalDate
 
 class Utils {
 
     companion object {
+
+        fun determineGender(gender: String): String =
+            when (gender) {
+                "м" -> "Мужской"
+                "ж" -> "Женский"
+                else -> "Не указан"
+            }
+
+
+        fun getDates(weeksLimit: Int): List<LocalDate> {
+
+            val dates = mutableListOf<LocalDate>()
+            val now = LocalDate.now()
+
+            for (days in 0L..7 * weeksLimit) {
+
+                val current = now.plusDays(days)
+
+                if (isWorkDay(current.dayOfWeek)) {
+                    dates.add(current)
+                }
+            }
+
+            return dates
+        }
 
         fun getRusDayName(day: DayOfWeek) = when (day) {
             DayOfWeek.MONDAY -> "Понедельник"
