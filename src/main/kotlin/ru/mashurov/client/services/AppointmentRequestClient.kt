@@ -2,28 +2,31 @@ package ru.mashurov.client.services
 
 import retrofit2.Call
 import retrofit2.http.*
-import ru.mashurov.client.dtos.AppointmentRequestCreateDto
-import ru.mashurov.client.dtos.AppointmentRequestDto
-import ru.mashurov.client.dtos.ClinicDto
-import ru.mashurov.client.dtos.VeterinarianDto
+import ru.mashurov.client.dtos.*
 
 interface AppointmentRequestClient {
 
     @GET("/api/clinics")
-    fun findAllClinics(@Query("region") region: Long): Call<MutableList<ClinicDto>>
+    fun findAllClinics(@Query("region") region: Long): Call<PageResolver<ClinicDto>>
 
-    @GET("/api/clinics/{id}/get")
+    @GET("/api/clinics/{id}")
     fun findClinic(@Path("id") id: Long): Call<ClinicDto>
 
-    @GET("/api/veterinarians")
-    fun findAllVeterinarians(@Query("clinic") clinic: Long): Call<MutableList<VeterinarianDto>>
+    @GET("/api/clinics/{id}/veterinarians")
+    fun findAllVeterinariansByClinicId(@Path("id") clinicId: Long): Call<PageResolver<VeterinarianDto>>
 
     @POST("/api/appointments/create")
-    fun createRequest(@Body req: AppointmentRequestCreateDto): Call<Void>
+    fun createRequest(@Body req: AppointmentRequestDto): Call<Void>
 
-    @GET("/api/appointments")
-    fun fetchAllAppointmentRequests(@Query("id") id: Long): Call<MutableList<AppointmentRequestDto>>
+    @GET("/api/services/{id}")
+    fun findService(@Path("id") id: Long): Call<ServiceDto>
 
-    @DELETE("/api/appointments/{id}/remove")
-    fun remove(@Path("id") id: Long): Call<Void>
+    @GET("/api/veterinarians/{id}")
+    fun findVeterinarian(@Path("id") id: Long): Call<VeterinarianDto>
+
+    @GET("/api/veterinarians/{id}/allow-timetable")
+    fun findAllowTimePeriodsByVeterinarianIdAndDate(
+        @Path("id") id: Long, @Query("date") date: String
+    ): Call<List<TimePeriod>>
+
 }

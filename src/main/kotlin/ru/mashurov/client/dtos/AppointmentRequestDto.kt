@@ -1,10 +1,11 @@
 package ru.mashurov.client.dtos
 
 data class AppointmentRequestDto(
-    val id: Long,
-    val clinicName: String,
-    val veterinarianName: String,
-    val appointmentPlace: String,
-    val petName: String,
-    val serviceName: String
+    var appointmentPlace: String = "",
+    var clinicId: Long = 0,
+    var serviceId: Long = 0,
+    var veterinarianId: Long = 0,
+    var userId: Long = 0,
+    var petId: Long = 0,
+    var date: String = ""
 )

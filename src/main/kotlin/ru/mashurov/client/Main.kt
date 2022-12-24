@@ -2,17 +2,15 @@ package ru.mashurov.client
 
 import Keyboard.Companion.listKeyboard
 import Keyboard.Companion.mainMenuKeyboard
-import Keyboard.Companion.oneDeleteKeyboard
 import Keyboard.Companion.petOneKeyboard
 import Keyboard.Companion.petsKeyboard
+import Keyboard.Companion.regionsKeyboard
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
 import com.github.kotlintelegrambot.dispatcher.*
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
-import com.github.kotlintelegrambot.entities.KeyboardReplyMarkup
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
-import com.github.kotlintelegrambot.entities.keyboard.KeyboardButton
 import com.github.kotlintelegrambot.extensions.filters.Filter
 import com.github.kotlintelegrambot.logging.LogLevel
 import com.google.gson.Gson
@@ -21,14 +19,18 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import ru.mashurov.client.IdType.TABLE
 import ru.mashurov.client.IdType.TELEGRAM
 import ru.mashurov.client.Messages.Companion.GENERAL_ERROR_MESSAGE
 import ru.mashurov.client.Messages.Companion.startMessage
+import ru.mashurov.client.Utils.Companion.getRusDayName
+import ru.mashurov.client.Utils.Companion.getUrlParams
+import ru.mashurov.client.Utils.Companion.isSameCallbackQueryDataUrl
+import ru.mashurov.client.Utils.Companion.isWorkDay
 import ru.mashurov.client.dtos.*
-import ru.mashurov.client.services.AppointmentClient
-import ru.mashurov.client.services.AppointmentRequestClient
-import ru.mashurov.client.services.PetClient
-import ru.mashurov.client.services.UserClient
+import ru.mashurov.client.services.*
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter.ofPattern
 
 class Main
 
@@ -46,7 +48,7 @@ val retrofit: Retrofit = Retrofit.Builder()
     .client(okHttpClient)
     .build()
 
-val appointmentRequestCreateDto = AppointmentRequestCreateDto()
+val appointmentRequestDto = AppointmentRequestDto()
 
 fun main() {
 
@@ -56,6 +58,7 @@ fun main() {
     val petClient = retrofit.create(PetClient::class.java)
     val appointmentRequestClient = retrofit.create(AppointmentRequestClient::class.java)
     val appointmentClient = retrofit.create(AppointmentClient::class.java)
+    val regionClient = retrofit.create(RegionClient::class.java)
 
     val bot = bot {
         token = System.getenv("BOT_TOKEN")
@@ -64,20 +67,62 @@ fun main() {
             startCommand(userClient)
             petCommands(userClient, petClient, appointmentClient)
             appointmentCommands(userClient, appointmentRequestClient)
-            appointmentRequestsCommands(userClient, appointmentRequestClient)
             mainCommand(userClient)
+            profileSettingsCommands(regionClient, userClient)
         }
     }
 
     bot.startPolling()
 }
 
-private fun Dispatcher.appointmentRequestsCommands(
-    userClient: UserClient,
-    appointmentRequestClient: AppointmentRequestClient
+private fun Dispatcher.profileSettingsCommands(
+    regionClient: RegionClient,
+    userClient: UserClient
 ) {
+    callbackQuery("profile_settings") {
 
-    callbackQuery("my_appointments") {
+        bot.editMessageText(
+            ChatId.fromId(callbackQuery.message!!.chat.id),
+            callbackQuery.message!!.messageId,
+            text = "Настройка профиля",
+            replyMarkup = InlineKeyboardMarkup.create(
+                listOf(listOf(InlineKeyboardButton.CallbackData("Сменить регион", "change_reg")))
+            )
+        )
+    }
+
+    callbackQuery("change_reg") {
+
+        val regionsRequest = regionClient.findAll().execute()
+
+        if (regionsRequest.isSuccessful) {
+
+            val regions = regionsRequest.body()!!
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = "Выберите новый регион",
+                replyMarkup = listKeyboard(
+                    "select_reg",
+                    regions.map(RegionDto::toNamedEntityDto).toMutableList()
+                )
+            )
+
+        } else {
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = GENERAL_ERROR_MESSAGE,
+                replyMarkup = mainMenuKeyboard
+            )
+        }
+    }
+
+    callbackQuery("select_reg") {
+
+        val regionCode = getUrlParams(callbackQuery.data)["id"]!!.toLong()
 
         val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
 
@@ -85,22 +130,432 @@ private fun Dispatcher.appointmentRequestsCommands(
 
             val user = userRequest.body()!!
 
-            val userAppointments = appointmentRequestClient.fetchAllAppointmentRequests(user.id!!).execute().body()
+            val setRegionRequest = userClient.setRegion(user.id!!, regionCode).execute()
 
-            if (userAppointments!!.isNotEmpty()) {
+            if (setRegionRequest.isSuccessful) {
 
-                userAppointments.forEach {
-                    bot.sendMessage(
-                        ChatId.fromId(callbackQuery.message!!.chat.id),
-                        """
-                        Заявление №${it.id}
-                        Клиника: ${it.clinicName}
-                        Ветеринар: ${it.veterinarianName}
-                        Услуга: ${it.serviceName}
-                        Место оказания: ${it.appointmentPlace}
-                        Питомец: ${it.petName}
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Новый регион успешно установлен!",
+                    replyMarkup = mainMenuKeyboard
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+
+        } else {
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = GENERAL_ERROR_MESSAGE,
+                replyMarkup = mainMenuKeyboard
+            )
+        }
+
+    }
+}
+
+private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRequestClient: AppointmentRequestClient) {
+
+    callbackQuery("appointment_req") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req", callbackQuery.data)) {
+
+            val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
+
+            if (userRequest.isSuccessful && userRequest.body() != null) {
+
+                val user = userRequest.body()!!
+
+                appointmentRequestDto.userId = user.id!!
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Выберите питомца",
+                    replyMarkup = listKeyboard(
+                        "appointment_req_1",
+                        user.pets.map(PetDto::toNamedEntityDto).toMutableList()
+                    )
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_1") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_1", callbackQuery.data)) {
+
+            appointmentRequestDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val user = userClient.getUser(appointmentRequestDto.userId, TABLE.type).execute().body()!!
+            val clinicsRequest = appointmentRequestClient.findAllClinics(user.region!!.code).execute()
+
+            if (clinicsRequest.isSuccessful) {
+
+                val clinics = clinicsRequest.body()!!.content
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Выберите клинику",
+                    replyMarkup = listKeyboard(
+                        "appointment_req_1_conf",
+                        clinics.map(ClinicDto::toNamedEntityDto).toMutableList()
+                    )
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+
+    callbackQuery("appointment_req_1_conf") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_1_conf", callbackQuery.data)) {
+
+            appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestDto.clinicId).execute()
+
+            if (clinicRequest.isSuccessful) {
+
+                val clinic = clinicRequest.body()!!
+
+                val confirmationKeyboard = InlineKeyboardMarkup.create(
+                    listOf(
+                        listOf(
+                            InlineKeyboardButton.CallbackData("Далее", "appointment_req_2?id=${clinic.id}"),
+                            InlineKeyboardButton.CallbackData(
+                                "Назад",
+                                "appointment_req_1?id=${appointmentRequestDto.petId}"
+                            )
+                        )
+                    )
+                )
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = """
+                    Вы хотите выбрать данную поликлинику?
+                    Название: ${clinic.name}
+                    Адрес: ${clinic.address}
                     """.trimIndent(),
-                        replyMarkup = oneDeleteKeyboard("del_appointment_req", it.id)
+                    replyMarkup = confirmationKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_2") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_2", callbackQuery.data)) {
+
+            appointmentRequestDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val appointmentPlaceKeyboard = InlineKeyboardMarkup.create(
+                listOf(
+                    listOf(
+                        InlineKeyboardButton.CallbackData("На дому", "appointment_req_3?place=home"),
+                        InlineKeyboardButton.CallbackData("В клинике", "appointment_req_3?place=clinic")
+                    )
+                )
+            )
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = "На дому или в клинике",
+                replyMarkup = appointmentPlaceKeyboard
+            )
+        }
+    }
+
+    callbackQuery("appointment_req_3") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_3", callbackQuery.data)) {
+
+            appointmentRequestDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
+
+            val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestDto.clinicId).execute()
+
+            if (clinicRequest.isSuccessful) {
+
+                val clinic = clinicRequest.body()!!
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Выберите необходимую услугу",
+                    replyMarkup = listKeyboard(
+                        "appointment_req_3_conf",
+                        clinic.services.map(ServiceDto::toNamedEntityDto).toMutableList()
+                    )
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_3_conf") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_3_conf", callbackQuery.data)) {
+
+            appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val serviceRequest = appointmentRequestClient.findService(appointmentRequestDto.serviceId).execute()
+
+            if (serviceRequest.isSuccessful) {
+
+                val service = serviceRequest.body()!!
+
+                val confirmationKeyboard = InlineKeyboardMarkup.create(
+                    listOf(
+                        listOf(
+                            InlineKeyboardButton.CallbackData("Далее", "appointment_req_4?id=${service.id}"),
+                            InlineKeyboardButton.CallbackData(
+                                "Назад",
+                                "appointment_req_3?place=${appointmentRequestDto.appointmentPlace}"
+                            )
+                        )
+                    )
+                )
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = """
+                    Вы хотите выбрать данную услугу?
+                    Название: ${service.name}
+                    Описание: ${service.description}
+                    Стоимость: ${service.cost}
+                    """.trimIndent(),
+                    replyMarkup = confirmationKeyboard
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_4") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_4", callbackQuery.data)) {
+
+            appointmentRequestDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val veterinariansRequest = appointmentRequestClient
+                .findAllVeterinariansByClinicId(appointmentRequestDto.clinicId)
+                .execute()
+
+            if (veterinariansRequest.isSuccessful) {
+
+                val veterinarians = veterinariansRequest.body()!!.content
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = "Выберите ветеринара",
+                    replyMarkup = listKeyboard(
+                        "appointment_req_4_conf",
+                        veterinarians.map(VeterinarianDto::toNamedEntityDto).toMutableList()
+                    )
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_4_conf") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_4_conf", callbackQuery.data)) {
+
+            appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            val veterinarianRequest =
+                appointmentRequestClient.findVeterinarian(appointmentRequestDto.veterinarianId).execute()
+
+            if (veterinarianRequest.isSuccessful) {
+
+                val veterinarian = veterinarianRequest.body()!!
+
+                val confirmationKeyboard = InlineKeyboardMarkup.create(
+                    listOf(
+                        listOf(
+                            InlineKeyboardButton.CallbackData("Далее", "appointment_req_5?id=${veterinarian.id}"),
+                            InlineKeyboardButton.CallbackData(
+                                "Назад",
+                                "appointment_req_4?id=${appointmentRequestDto.serviceId}"
+                            )
+                        )
+                    )
+                )
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = """
+                    Вы хотите выбрать данного ветеринара?
+                    ФИО: ${veterinarian.getSNP()}
+                    Опыт работы (годы): ${veterinarian.experience}
+                    """.trimIndent(),
+                    replyMarkup = confirmationKeyboard
+                )
+
+            } else {
+
+                bot.editMessageText(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    callbackQuery.message!!.messageId,
+                    text = GENERAL_ERROR_MESSAGE,
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+    }
+
+    callbackQuery("appointment_req_5") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_5", callbackQuery.data)) {
+
+            appointmentRequestDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+            // Расписание на две недели вперёд
+            val dates = getDates(2)
+
+            val inlineTable = mutableListOf<List<InlineKeyboardButton.CallbackData>>()
+            var row = mutableListOf<InlineKeyboardButton.CallbackData>()
+
+            for ((k, date) in dates.withIndex()) {
+
+                val formatDate = date.format(ofPattern("dd.MM.yyyy"))
+
+                row.add(
+                    InlineKeyboardButton.CallbackData(
+                        "${getRusDayName(date.dayOfWeek)}, $formatDate", "appointment_req_6?date=${date}"
+                    )
+                )
+
+                if (k % 2 == 0) {
+                    inlineTable.add(row.toList())
+                    row = mutableListOf()
+                }
+            }
+
+            val keyboard = InlineKeyboardMarkup.create(inlineTable)
+
+            bot.editMessageText(
+                ChatId.fromId(callbackQuery.message!!.chat.id),
+                callbackQuery.message!!.messageId,
+                text = "Выберите дату посещения",
+                replyMarkup = keyboard
+            )
+        }
+    }
+
+    callbackQuery("appointment_req_6") {
+
+        if (isSameCallbackQueryDataUrl("appointment_req_6", callbackQuery.data)) {
+
+            appointmentRequestDto.date = getUrlParams(callbackQuery.data)["date"]!!
+
+            val timesRequest = appointmentRequestClient
+                .findAllowTimePeriodsByVeterinarianIdAndDate(
+                    appointmentRequestDto.veterinarianId, appointmentRequestDto.date
+                )
+                .execute()
+
+            if (timesRequest.isSuccessful) {
+
+                val times = timesRequest.body()!!
+
+                if (times.isNotEmpty()) {
+
+                    val inlineTable = mutableListOf<List<InlineKeyboardButton.CallbackData>>()
+                    var row = mutableListOf<InlineKeyboardButton.CallbackData>()
+
+                    for ((k, time) in times.withIndex()) {
+
+                        row.add(
+                            InlineKeyboardButton.CallbackData(
+                                time.start.removeSuffix(":00"), "appointment_req_7?time=${time.start}"
+                            )
+                        )
+
+                        if (k % 2 == 0 && k != 0) {
+                            inlineTable.add(row.toList())
+                            row = mutableListOf()
+                        }
+                    }
+
+                    if (row.isNotEmpty()) inlineTable.add(row)
+
+                    val keyboard = InlineKeyboardMarkup.create(inlineTable)
+
+                    bot.editMessageText(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        callbackQuery.message!!.messageId,
+                        text = "Выберите время посещения",
+                        replyMarkup = keyboard
+                    )
+
+                } else {
+
+                    bot.editMessageText(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        callbackQuery.message!!.messageId,
+                        text = "Для выбранного дня нет расписания",
+                        replyMarkup = mainMenuKeyboard
                     )
                 }
 
@@ -109,206 +564,33 @@ private fun Dispatcher.appointmentRequestsCommands(
                 bot.editMessageText(
                     ChatId.fromId(callbackQuery.message!!.chat.id),
                     callbackQuery.message!!.messageId,
-                    text = "У вас нет никаких заявлений, попробуйте подать заявление через главное меню",
+                    text = GENERAL_ERROR_MESSAGE,
                     replyMarkup = mainMenuKeyboard
                 )
             }
-
         }
     }
 
-    callbackQuery("del_appointment_req") {
+    callbackQuery("appointment_req_7") {
 
-        val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+        if (isSameCallbackQueryDataUrl("appointment_req_7", callbackQuery.data)) {
 
-        val removeRequest = appointmentRequestClient.remove(id).execute()
+            appointmentRequestDto.date += "T" + getUrlParams(callbackQuery.data)["time"]!!
 
-        if (removeRequest.isSuccessful) {
+            val response = appointmentRequestClient.createRequest(appointmentRequestDto).execute()
 
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = "Заявление №$id успешно удалено!"
-            )
-
-        } else {
-
-            bot.sendMessage(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                "Произошла ошибка при удалении заявления №$id, попробуйте позже"
-            )
-        }
-    }
-}
-
-private fun Dispatcher.appointmentCommands(userClient: UserClient, appointmentRequestClient: AppointmentRequestClient) {
-
-    callbackQuery("appointment_req") {
-
-        val userRequest = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute()
-
-        if (userRequest.isSuccessful && userRequest.body() != null) {
-
-            val user = userRequest.body()!!
-
-            appointmentRequestCreateDto.userId = user.id!!
-            appointmentRequestCreateDto.regionCode = user.region!!.code
-
-            if (callbackQuery.data == "appointment_req") {
-
-                bot.editMessageText(
-                    ChatId.fromId(callbackQuery.message!!.chat.id),
-                    callbackQuery.message!!.messageId,
-                    text = "Выберите питомца",
-                    replyMarkup = listKeyboard(
-                        "appointment_req_1",
-                        user.pets!!.map(PetDto::toNamedEntityDto).toMutableList()
-                    )
-                )
+            val answerMessage = when (response.isSuccessful) {
+                true -> "Ваше заявление на приём успешно создано!"
+                else -> "К сожалению, при создании вашего заявления произошла какая-то ошибка. Повторите попытку позже"
             }
 
-        } else {
-
             bot.editMessageText(
                 ChatId.fromId(callbackQuery.message!!.chat.id),
                 callbackQuery.message!!.messageId,
-                text = GENERAL_ERROR_MESSAGE,
+                text = answerMessage,
                 replyMarkup = mainMenuKeyboard
             )
         }
-    }
-
-    callbackQuery("appointment_req_1") {
-
-        appointmentRequestCreateDto.petId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-
-        val clinicsRequest = appointmentRequestClient.findAllClinics(appointmentRequestCreateDto.regionCode).execute()
-
-        if (clinicsRequest.isSuccessful) {
-
-            val clinics = clinicsRequest.body()!!
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = "Выберите клинику",
-                replyMarkup = listKeyboard(
-                    "appointment_req_2",
-                    clinics.map(ClinicDto::toNamedEntityDto).toMutableList()
-                )
-            )
-
-        } else {
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = GENERAL_ERROR_MESSAGE,
-                replyMarkup = mainMenuKeyboard
-            )
-        }
-    }
-
-    callbackQuery("appointment_req_2") {
-
-        appointmentRequestCreateDto.clinicId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-
-        val appointmentPlaceKeyboard = InlineKeyboardMarkup.create(
-            listOf(
-                listOf(
-                    InlineKeyboardButton.CallbackData("На дому", "appointment_req_3?place=home"),
-                    InlineKeyboardButton.CallbackData("В клинике", "appointment_req_3?place=clinic")
-                )
-            )
-        )
-
-        bot.editMessageText(
-            ChatId.fromId(callbackQuery.message!!.chat.id),
-            callbackQuery.message!!.messageId,
-            text = "На дому или в клинике",
-            replyMarkup = appointmentPlaceKeyboard
-        )
-    }
-
-    callbackQuery("appointment_req_3") {
-
-        appointmentRequestCreateDto.appointmentPlace = getUrlParams(callbackQuery.data)["place"]!!
-
-        val clinicRequest = appointmentRequestClient.findClinic(appointmentRequestCreateDto.clinicId).execute()
-
-        if (clinicRequest.isSuccessful) {
-
-            val clinic = clinicRequest.body()!!
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = "Выберите необходимую услугу",
-                replyMarkup = listKeyboard(
-                    "appointment_req_4",
-                    clinic.services.map(ServiceDto::toNamedEntityDto).toMutableList()
-                )
-            )
-        } else {
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = GENERAL_ERROR_MESSAGE,
-                replyMarkup = mainMenuKeyboard
-            )
-        }
-
-    }
-
-    callbackQuery("appointment_req_4") {
-
-        appointmentRequestCreateDto.serviceId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-
-        val veterinariansRequest =
-            appointmentRequestClient.findAllVeterinarians(appointmentRequestCreateDto.clinicId).execute()
-
-        if (veterinariansRequest.isSuccessful) {
-
-            val veterinarians = veterinariansRequest.body()!!
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = "Выберите ветеринара",
-                replyMarkup = listKeyboard(
-                    "appointment_req_5",
-                    veterinarians.map(VeterinarianDto::toNamedEntityDto).toMutableList()
-                )
-            )
-        } else {
-
-            bot.editMessageText(
-                ChatId.fromId(callbackQuery.message!!.chat.id),
-                callbackQuery.message!!.messageId,
-                text = GENERAL_ERROR_MESSAGE,
-                replyMarkup = mainMenuKeyboard
-            )
-        }
-    }
-
-    callbackQuery("appointment_req_5") {
-
-        appointmentRequestCreateDto.veterinarianId = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-
-        val response = appointmentRequestClient.createRequest(appointmentRequestCreateDto).execute()
-
-        val answerMessage = when (response.isSuccessful) {
-            true -> "Ваше заявление на приём успешно создано!"
-            else -> "К сожалению, при создании вашего заявления произошла какая-то ошибка. Повторите попытку позже"
-        }
-
-        bot.editMessageText(
-            ChatId.fromId(callbackQuery.message!!.chat.id),
-            callbackQuery.message!!.messageId,
-            text = answerMessage,
-            replyMarkup = mainMenuKeyboard
-        )
     }
 }
 
@@ -538,7 +820,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
     }
 }
 
-private fun determineGender(gender: String): String =
+fun determineGender(gender: String): String =
     when (gender) {
         "м" -> "Мужской"
         "ж" -> "Женский"
@@ -555,41 +837,24 @@ private fun Dispatcher.startCommand(userClient: UserClient) {
 
             bot.sendMessage(ChatId.fromId(message.chat.id), startMessage)
 
-            val regions = userClient.getRegions().execute().body()!!
+            val regionsRequest = userClient.getRegions().execute()
 
-            val regionKeyboard = KeyboardReplyMarkup(
-                listOf(regions.map { KeyboardButton(it.name) }.toList()),
-                resizeKeyboard = true,
-                oneTimeKeyboard = true
-            )
+            if (regionsRequest.isSuccessful) {
 
-            bot.sendMessage(
-                ChatId.fromId(message.chat.id),
-                "Выберите ваш регион",
-                replyMarkup = regionKeyboard
-            )
+                val regions = regionsRequest.body()!!
 
-            message(Filter.Text) {
-                val regionName = message.text.toString()
-                val regionDto = regions.first { dto -> dto.name == regionName }
-                val userDto = UserDto(
-                    message.chat.firstName!!,
-                    message.chat.username,
-                    message.chat.id,
-                    regionDto,
-                    mutableListOf()
+                val namedEntityRegions = regions
+                    .map { region -> NamedEntityDto(region.code, region.name) }
+                    .toMutableList()
+
+                bot.sendMessage(
+                    ChatId.fromId(message.chat.id),
+                    "Выберите ваш регион",
+                    replyMarkup = regionsKeyboard("regions", namedEntityRegions)
                 )
-
-                val userSaveRequest = userClient.save(userDto).execute()
-
-                if (userSaveRequest.isSuccessful) {
-                    bot.sendMessage(ChatId.fromId(message.chat.id), "Вы успешно авторизовались!")
-                }
             }
 
         } else {
-
-            val user = userClient.getUser(message.chat.id, TELEGRAM.type).execute().body()
 
             bot.sendMessage(
                 ChatId.fromId(message.chat.id),
@@ -598,18 +863,52 @@ private fun Dispatcher.startCommand(userClient: UserClient) {
             )
         }
     }
+
+    callbackQuery("regions") {
+
+        val regionCode = getUrlParams(callbackQuery.data)["id"]!!.toLong()
+
+        val regionRequest = userClient.getRegion(regionCode).execute()
+
+        if (regionRequest.isSuccessful) {
+
+            val region = regionRequest.body()!!
+
+            val userDto = UserDto(
+                callbackQuery.message!!.chat.firstName!!,
+                callbackQuery.message!!.chat.username,
+                callbackQuery.message!!.chat.id,
+                region
+            )
+
+            val userSaveRequest = userClient.save(userDto).execute()
+
+            if (userSaveRequest.isSuccessful) {
+
+                bot.sendMessage(
+                    ChatId.fromId(callbackQuery.message!!.chat.id),
+                    "Вы успешно авторизовались!",
+                    replyMarkup = mainMenuKeyboard
+                )
+            }
+        }
+
+    }
 }
 
-private fun getUrlParams(s: String): Map<String, String> {
-    val indexBeginParams = s.indexOf('?')
-    val buffer = StringBuffer(s)
-    val varVal = mutableMapOf<String, String>()
+private fun getDates(weeksLimit: Int): List<LocalDate> {
 
-    buffer.substring(indexBeginParams + 1).split("&").map { param ->
-        with(param.split("=")) {
-            varVal[get(0)] = get(1)
+    val dates = mutableListOf<LocalDate>()
+    val now = LocalDate.now()
+
+    for (days in 0L..7 * weeksLimit) {
+
+        val current = now.plusDays(days)
+
+        if (isWorkDay(current.dayOfWeek)) {
+            dates.add(current)
         }
     }
 
-    return varVal
+    return dates
 }
