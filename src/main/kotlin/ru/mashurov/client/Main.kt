@@ -30,7 +30,9 @@ import ru.mashurov.client.Utils.Companion.getUrlParams
 import ru.mashurov.client.Utils.Companion.isSameCallbackQueryDataUrl
 import ru.mashurov.client.dtos.*
 import ru.mashurov.client.services.*
+import java.text.SimpleDateFormat
 import java.time.format.DateTimeFormatter.ofPattern
+import java.util.*
 
 class Main
 
@@ -116,11 +118,11 @@ private fun Dispatcher.appointmentRequestsCommands(
                             Адрес: ${if (it.appointmentPlace == "clinic") it.clinicAddress else "На дому"}
                             Ветеринар: ${it.veterinarianName}
                             Услуга: ${it.serviceName}
-                            Дата: ${it.date}
+                            Дата: ${convertDateToNormalFormat(it)}
                             Статус заявления: ${it.status}
                             Питомец: ${it.petName}
                         """.trimIndent(),
-                            replyMarkup = keyboard
+                            replyMarkup = if (it.status == "Принято" || it.status == "Отклонено") null else keyboard
                         )
                     }
 
@@ -198,6 +200,14 @@ private fun Dispatcher.appointmentRequestsCommands(
 
     }
 
+}
+
+private fun convertDateToNormalFormat(it: AppointmentRequestDto): String? {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm")
+    val output = SimpleDateFormat("dd.MM.yyyy HH:mm")
+    val d: Date = sdf.parse(it.date)
+    val formatDate = output.format(d)
+    return formatDate
 }
 
 private fun Dispatcher.profileSettingsCommands(

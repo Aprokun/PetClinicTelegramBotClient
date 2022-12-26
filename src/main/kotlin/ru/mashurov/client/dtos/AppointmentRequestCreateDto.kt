@@ -7,6 +7,5 @@ data class AppointmentRequestCreateDto(
     var veterinarianId: Long = 0,
     var userId: Long = 0,
     var date: String = "",
-    var regionCode: Long = 0,
     var petId: Long = 0
 )
