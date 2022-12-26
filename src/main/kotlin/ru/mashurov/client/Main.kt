@@ -656,9 +656,9 @@ private fun Dispatcher.appointmentRequestCommands(
 
             if (timesRequest.isSuccessful) {
 
-                val times = timesRequest.body()!!
+                val times = timesRequest.body()
 
-                if (times.isNotEmpty()) {
+                if (!times.isNullOrEmpty()) {
 
                     val inlineTable = mutableListOf<List<InlineKeyboardButton.CallbackData>>()
                     var row = mutableListOf<InlineKeyboardButton.CallbackData>()
