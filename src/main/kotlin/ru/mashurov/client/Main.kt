@@ -7,7 +7,10 @@ import Keyboard.Companion.petsKeyboard
 import Keyboard.Companion.regionsKeyboard
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
-import com.github.kotlintelegrambot.dispatcher.*
+import com.github.kotlintelegrambot.dispatcher.Dispatcher
+import com.github.kotlintelegrambot.dispatcher.callbackQuery
+import com.github.kotlintelegrambot.dispatcher.command
+import com.github.kotlintelegrambot.dispatcher.message
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.InlineKeyboardMarkup
 import com.github.kotlintelegrambot.entities.keyboard.InlineKeyboardButton
@@ -23,6 +26,8 @@ import ru.mashurov.client.IdType.TABLE
 import ru.mashurov.client.IdType.TELEGRAM
 import ru.mashurov.client.Messages.Companion.GENERAL_ERROR_MESSAGE
 import ru.mashurov.client.Messages.Companion.startMessage
+import ru.mashurov.client.Utils.Companion.convertAppointmentPlace
+import ru.mashurov.client.Utils.Companion.convertDateToNormalFormat
 import ru.mashurov.client.Utils.Companion.determineGender
 import ru.mashurov.client.Utils.Companion.getDates
 import ru.mashurov.client.Utils.Companion.getRusDayName
@@ -30,9 +35,7 @@ import ru.mashurov.client.Utils.Companion.getUrlParams
 import ru.mashurov.client.Utils.Companion.isSameCallbackQueryDataUrl
 import ru.mashurov.client.dtos.*
 import ru.mashurov.client.services.*
-import java.text.SimpleDateFormat
 import java.time.format.DateTimeFormatter.ofPattern
-import java.util.*
 
 class Main
 
@@ -69,7 +72,7 @@ fun main() {
         dispatch {
             startCommand(userClient)
             appointmentRequestsCommands(userClient, appointmentRequestsClient)
-            petCommands(userClient, petClient, appointmentClient)
+            petCommands(userClient, petClient)
             appointmentRequestCommands(userClient, appointmentRequestClient)
             mainCommand(userClient)
             profileSettingsCommands(regionClient, userClient)
@@ -196,18 +199,7 @@ private fun Dispatcher.appointmentRequestsCommands(
                 replyMarkup = mainMenuKeyboard
             )
         }
-
-
     }
-
-}
-
-private fun convertDateToNormalFormat(it: AppointmentRequestDto): String? {
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm")
-    val output = SimpleDateFormat("dd.MM.yyyy HH:mm")
-    val d: Date = sdf.parse(it.date)
-    val formatDate = output.format(d)
-    return formatDate
 }
 
 private fun Dispatcher.profileSettingsCommands(
@@ -753,7 +745,7 @@ private fun Dispatcher.mainCommand(userClient: UserClient) {
     }
 }
 
-private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient, appointmentClient: AppointmentClient) {
+private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient) {
 
     callbackQuery("pets") {
 
@@ -773,7 +765,7 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
 
             val user = userRequest.body()!!
 
-            if (user.pets.isNotEmpty()) {
+            if (!user.pets.isNullOrEmpty()) {
 
                 bot.editMessageText(
                     ChatId.fromId(callbackQuery.message!!.chat.id),
@@ -900,15 +892,42 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
     callbackQuery("pet_one_change") {
 
         val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-        val user = userClient.getUser(callbackQuery.message!!.chat.id, TELEGRAM.type).execute().body()!!
 
         bot.sendMessage(
             ChatId.fromId(callbackQuery.message!!.chat.id),
             "Введите новые данные для питомца (Имя, пол, возраст через пробел)"
         )
 
-        text {
+        message(Filter.Text) {
 
+            with(update.message?.text.toString().trim().split(" ")) {
+
+                val name = get(0)
+                val gender = determineGender(get(1))
+                val age = get(2).toInt()
+
+                val updateDto = PetUpdateDto(id, name, gender, age)
+
+                val petUpdateRequest = petClient.update(updateDto).execute()
+
+                if (petUpdateRequest.isSuccessful) {
+
+                    bot.editMessageText(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        callbackQuery.message!!.messageId,
+                        text = "Питомец обновлён ($name)",
+                        replyMarkup = petsKeyboard
+                    )
+
+                } else {
+
+                    bot.editMessageText(
+                        ChatId.fromId(callbackQuery.message!!.chat.id),
+                        text = GENERAL_ERROR_MESSAGE,
+                        replyMarkup = petsKeyboard
+                    )
+                }
+            }
             //TODO довести до ума, а то пока печально
         }
     }
@@ -916,24 +935,23 @@ private fun Dispatcher.petCommands(userClient: UserClient, petClient: PetClient,
     callbackQuery("pet_one_disease") {
 
         val id = getUrlParams(callbackQuery.data)["id"]!!.toLong()
-        val petRequest = petClient.get(id).execute()
+        val petRequest = petClient.getAppointmentHistory(id).execute()
 
         if (petRequest.isSuccessful) {
 
-            val pet = petRequest.body()!!
+            val appointments = petRequest.body()
 
-            if (pet.appointments.isNotEmpty()) {
+            if (!appointments.isNullOrEmpty()) {
 
-                pet.appointments.forEach {
+                appointments.forEach {
                     bot.sendMessage(
                         ChatId.fromId(callbackQuery.message!!.chat.id),
                         """
-                        Причина посещения: ${it.serviceDto.name},
-                        Описание посещения: ${it.serviceDto.description}
-                        Дата посещения: ${it.appointmentDate}
-                        Место посещения: ${it.appointmentPlace}
-                        Врач: ${it.veterinarianDto.getSNP()}
-                    """.trimIndent()
+                            Причина посещения: ${it.serviceName},
+                            Дата посещения: ${convertDateToNormalFormat(it)}
+                            Место посещения: ${convertAppointmentPlace(it.appointmentPlace)}
+                            Врач: ${it.veterinarianName}
+                        """.trimIndent()
                     )
                 }
 
