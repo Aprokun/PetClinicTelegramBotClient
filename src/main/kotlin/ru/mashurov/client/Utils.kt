@@ -1,18 +1,34 @@
 package ru.mashurov.client
 
+import ru.mashurov.client.dtos.AppointmentRequestDto
+import java.text.SimpleDateFormat
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.util.*
 
 class Utils {
 
     companion object {
 
-        fun determineGender(gender: String): String =
-            when (gender) {
-                "м" -> "Мужской"
-                "ж" -> "Женский"
-                else -> "Не указан"
-            }
+        fun convertAppointmentPlace(appointmentPlace: String): String = when (appointmentPlace) {
+            "clinic" -> "В клинике"
+            "home" -> "На дому"
+            else -> throw java.lang.IllegalArgumentException("Нет такого места - $appointmentPlace")
+        }
+
+        fun convertDateToNormalFormat(appointmentRequestDto: AppointmentRequestDto): String? {
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm")
+            val output = SimpleDateFormat("dd.MM.yyyy HH:mm")
+            val d: Date = sdf.parse(appointmentRequestDto.date)
+            val formatDate = output.format(d)
+            return formatDate
+        }
+
+        fun determineGender(gender: String): String = when (gender) {
+            "м" -> "Мужской"
+            "ж" -> "Женский"
+            else -> "Не указан"
+        }
 
 
         fun getDates(weeksLimit: Int): List<LocalDate> {
